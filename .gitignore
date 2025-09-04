@@ -53,3 +53,27 @@ Thumbs.db
 
 # TanStack Router
 **/routeTree.gen.ts
+
+# Cache directories
+.cache/
+.parcel-cache/
+.eslintcache
+
+# Temporary files
+*.tmp
+*.temp
+
+# Testing
+test-results/
+playwright-report/
+
+# Package manager alternatives (using pnpm)
+package-lock.json
+yarn.lock
+
+# Editor files
+*.sublime-*
+*.code-workspace
+
+# Local development
+.vite-inspect/
