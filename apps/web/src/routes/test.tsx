@@ -1,45 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useRef } from 'react';
-// Import the worker using Vite's worker syntax
-import SqliteWorker from '../workers/sqlite-worker.js?worker';
-
-// RPC helper for clean worker communication
-class WorkerRPC {
-  private worker: Worker;
-  private pendingCalls = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }>();
-
-  constructor(worker: Worker) {
-    this.worker = worker;
-    this.worker.onmessage = this.handleMessage.bind(this);
-  }
-
-  private handleMessage(event: MessageEvent) {
-    const { id, type, payload, error } = event.data;
-    const pendingCall = this.pendingCalls.get(id);
-    
-    if (pendingCall) {
-      this.pendingCalls.delete(id);
-      if (error) {
-        pendingCall.reject(new Error(error));
-      } else {
-        pendingCall.resolve(payload);
-      }
-    }
-  }
-
-  async call<T>(type: string, payload?: any): Promise<T> {
-    const id = Math.random().toString(36).substr(2, 9);
-    
-    return new Promise((resolve, reject) => {
-      this.pendingCalls.set(id, { resolve, reject });
-      this.worker.postMessage({ id, type, payload });
-    });
-  }
-
-  terminate() {
-    this.worker.terminate();
-  }
-}
 
 export const Route = createFileRoute('/test')({
   component: TestPage,
@@ -84,26 +44,133 @@ function TestPage() {
     setResult(null);
 
     try {
+      const start = performance.now();
+      
+      // Load sql.js in the main thread for now - we can move to worker later once it's working
+      // Dynamic import sql.js
+      const sqlJsModule = await import('sql.js');
+      
+      // Initialize with WASM file location
+      const SQL = await sqlJsModule.default({
+        locateFile: (file: string) => `/sql/${file}`
+      });
+      
       // Convert file to ArrayBuffer
       const arrayBuffer = await file.arrayBuffer();
+      const fileBuffer = new Uint8Array(arrayBuffer);
+      const database = new SQL.Database(fileBuffer);
       
-      // Create worker and RPC client
-      const worker = new SqliteWorker();
-      const rpc = new WorkerRPC(worker);
+      // Query inventory with joins - get all rows, not just 100
+      const inventoryStmt = database.prepare(`
+        SELECT 
+          c.ZSCRYFALLID,
+          c.ZORACLEID,
+          c.ZSET, 
+          c.ZCOLLECTORNUMBER,
+          c.ZLANG,
+          copy.ZFINISH,
+          b.ZBINDERID,
+          b.ZNAME as collection_name,
+          copy.ZCOPIES
+        FROM ZPERSISTEDCOPY copy
+        JOIN ZPERSISTEDCARD c ON copy.ZCARD = c.Z_PK
+        JOIN ZPERSISTEDBINDER b ON copy.ZBINDER = b.Z_PK
+      `);
       
-      const start = performance.now();
-      const importResult = await rpc.call('load-helvault', { file: arrayBuffer });
+      const inventoryRows: any[] = [];
+      while (inventoryStmt.step()) {
+        const row = inventoryStmt.getAsObject();
+        
+        // Ensure we have either scryfall_id or oracle_id
+        const scryfallId = row.ZSCRYFALLID as string;
+        const oracleId = row.ZORACLEID as string;
+        if (!scryfallId && !oracleId) {
+          console.warn('Skipping inventory row without scryfall_id or oracle_id');
+          continue;
+        }
+        
+        // Convert binary ZBINDERID to base64 string safely
+        let collectionId = '';
+        try {
+          const binderIdBuffer = row.ZBINDERID;
+          if (binderIdBuffer && binderIdBuffer instanceof ArrayBuffer) {
+            collectionId = btoa(String.fromCharCode(...new Uint8Array(binderIdBuffer)));
+          } else if (typeof binderIdBuffer === 'string') {
+            collectionId = btoa(binderIdBuffer);
+          } else {
+            collectionId = String(binderIdBuffer || '');
+          }
+        } catch (e) {
+          console.warn('Failed to convert collection ID:', e);
+          collectionId = String(row.ZBINDERID || '');
+        }
+        
+        inventoryRows.push({
+          scryfall_id: scryfallId || oracleId,
+          set: row.ZSET as string,
+          collector_number: row.ZCOLLECTORNUMBER as string,
+          lang: row.ZLANG as string,
+          finishes: [row.ZFINISH as string],
+          collection_id: collectionId,
+          copies: row.ZCOPIES as number
+        });
+      }
+      inventoryStmt.free();
+      
+      // Create aggregates grouped by (scryfall_id, set, collector_number, lang, finishes, collection)
+      const aggregatesStmt = database.prepare(`
+        SELECT 
+          c.ZSCRYFALLID,
+          c.ZORACLEID,
+          c.ZSET,
+          c.ZCOLLECTORNUMBER,
+          c.ZLANG,
+          copy.ZFINISH,
+          b.ZNAME as collection_name,
+          SUM(copy.ZCOPIES) as total_copies
+        FROM ZPERSISTEDCOPY copy
+        JOIN ZPERSISTEDCARD c ON copy.ZCARD = c.Z_PK
+        JOIN ZPERSISTEDBINDER b ON copy.ZBINDER = b.Z_PK
+        GROUP BY c.ZSCRYFALLID, c.ZORACLEID, c.ZSET, c.ZCOLLECTORNUMBER, c.ZLANG, copy.ZFINISH, b.ZNAME
+      `);
+      
+      const aggregates: any[] = [];
+      while (aggregatesStmt.step()) {
+        const row = aggregatesStmt.getAsObject();
+        
+        // Ensure we have either scryfall_id or oracle_id
+        const scryfallId = row.ZSCRYFALLID as string;
+        const oracleId = row.ZORACLEID as string;
+        if (!scryfallId && !oracleId) {
+          console.warn('Skipping aggregate row without scryfall_id or oracle_id');
+          continue;
+        }
+        
+        aggregates.push({
+          scryfall_id: scryfallId || oracleId,
+          set: row.ZSET as string,
+          collector_number: row.ZCOLLECTORNUMBER as string,
+          lang: row.ZLANG as string,
+          finishes: [row.ZFINISH as string],
+          collection: row.collection_name as string,
+          copies: row.total_copies as number
+        });
+      }
+      aggregatesStmt.free();
+      
       const loadTime = performance.now() - start;
       
       setResult({
-        inventoryRows: importResult.inventoryRows,
-        aggregates: importResult.aggregates,
+        inventoryRows,
+        aggregates,
         loadTime,
       });
       
-      // Clean up worker
-      rpc.terminate();
+      // Clean up database
+      database.close();
+      
     } catch (err) {
+      console.error('Error processing file:', err);
       setError(err instanceof Error ? err.message : 'Failed to process file');
     } finally {
       setIsLoading(false);
