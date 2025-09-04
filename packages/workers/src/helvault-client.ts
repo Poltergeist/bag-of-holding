@@ -46,6 +46,6 @@ export class HelvaultClient {
  * @returns HelvaultClient instance
  */
 export function createHelvaultClient(workerUrl: string): HelvaultClient {
-  const worker = new Worker(workerUrl, { type: 'module' });
+  const worker = new Worker(workerUrl); // Remove module type to allow importScripts
   return new HelvaultClient(worker);
 }

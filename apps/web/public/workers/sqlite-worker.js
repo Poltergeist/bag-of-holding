@@ -2,10 +2,14 @@
 let SQL = null;
 async function initSqlJs() {
     if (!SQL) {
-        // Import sql.js - in a web worker context, this would need the WASM file
-        const sqlJsModule = await import('sql.js');
-        SQL = await sqlJsModule.default({
-        // In browser, would need: locateFile: (file) => `/path/to/${file}`
+        // Import sql.js - we need to load it from the URL in the browser worker context
+        // Instead of using import(), we'll use importScripts and create the SQL object manually
+        // Load sql.js from the server
+        importScripts('/sql/sql-wasm.js');
+        // Initialize SQL with WASM file location
+        // @ts-ignore - sql.js creates a global initSqlJs function
+        SQL = await initSqlJs({
+            locateFile: (file) => `/sql/${file}`
         });
     }
     return SQL;

@@ -1,6 +1,45 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useRef } from 'react';
-import { createHelvaultClient } from '@bag-of-holding/workers';
+// Import the worker using Vite's worker syntax
+import SqliteWorker from '../workers/sqlite-worker.js?worker';
+
+// RPC helper for clean worker communication
+class WorkerRPC {
+  private worker: Worker;
+  private pendingCalls = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }>();
+
+  constructor(worker: Worker) {
+    this.worker = worker;
+    this.worker.onmessage = this.handleMessage.bind(this);
+  }
+
+  private handleMessage(event: MessageEvent) {
+    const { id, type, payload, error } = event.data;
+    const pendingCall = this.pendingCalls.get(id);
+    
+    if (pendingCall) {
+      this.pendingCalls.delete(id);
+      if (error) {
+        pendingCall.reject(new Error(error));
+      } else {
+        pendingCall.resolve(payload);
+      }
+    }
+  }
+
+  async call<T>(type: string, payload?: any): Promise<T> {
+    const id = Math.random().toString(36).substr(2, 9);
+    
+    return new Promise((resolve, reject) => {
+      this.pendingCalls.set(id, { resolve, reject });
+      this.worker.postMessage({ id, type, payload });
+    });
+  }
+
+  terminate() {
+    this.worker.terminate();
+  }
+}
 
 export const Route = createFileRoute('/test')({
   component: TestPage,
@@ -48,20 +87,22 @@ function TestPage() {
       // Convert file to ArrayBuffer
       const arrayBuffer = await file.arrayBuffer();
       
-      // Create Helvault client with worker
-      const client = createHelvaultClient('/workers/sqlite-worker.js');
+      // Create worker and RPC client
+      const worker = new SqliteWorker();
+      const rpc = new WorkerRPC(worker);
       
       const start = performance.now();
-      const importResult = await client.openHelvault(arrayBuffer);
+      const importResult = await rpc.call('load-helvault', { file: arrayBuffer });
       const loadTime = performance.now() - start;
       
       setResult({
-        ...importResult,
+        inventoryRows: importResult.inventoryRows,
+        aggregates: importResult.aggregates,
         loadTime,
       });
       
       // Clean up worker
-      client.terminate();
+      rpc.terminate();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to process file');
     } finally {
