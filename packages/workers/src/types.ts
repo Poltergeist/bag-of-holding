@@ -1,4 +1,4 @@
-import type { HelvaultExport } from '@bag-of-holding/core';
+import type { HelvaultExport, InventoryItem, InventoryAggregate } from '@bag-of-holding/core';
 
 // Message types for communication with the worker
 export interface WorkerMessage {
@@ -47,9 +47,10 @@ export interface QueryInventoryMessage extends WorkerMessage {
 export interface HelvaultLoadedResponse extends WorkerResponse {
   type: 'helvault-loaded';
   payload: {
+    inventoryRows: InventoryItem[];
+    aggregates: InventoryAggregate[];
     collections: number;
     cards: number;
-    inventory: number;
   };
 }
 

@@ -8,13 +8,18 @@
     "build": "tsc -b",
     "dev": "tsc -b --watch",
     "typecheck": "tsc -b",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@bag-of-holding/core": "workspace:*"
+    "@bag-of-holding/core": "workspace:*",
+    "sql.js": "^1.13.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
-    "typescript": "^5.7.3"
+    "@types/sql.js": "^1.4.9",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
   }
 }
