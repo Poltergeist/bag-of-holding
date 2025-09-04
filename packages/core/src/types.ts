@@ -2,6 +2,9 @@
  * Core types for the Bag of Holding application
  */
 
+// Collection identifier
+export type CollectionId = string;
+
 // Card representation
 export interface Card {
   scryfall_id: string;
