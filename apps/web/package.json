@@ -1,0 +1,40 @@
+{
+  "name": "@bag-of-holding/web",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b",
+    "test": "vitest",
+    "clean": "rm -rf dist .vite"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "^1.91.11",
+    "@tanstack/router-devtools": "^1.91.11",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@bag-of-holding/core": "workspace:*",
+    "@bag-of-holding/ui": "workspace:*",
+    "@bag-of-holding/workers": "workspace:*"
+  },
+  "devDependencies": {
+    "@tanstack/router-vite-plugin": "^1.91.5",
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "jsdom": "^25.0.1",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
+  }
+}
