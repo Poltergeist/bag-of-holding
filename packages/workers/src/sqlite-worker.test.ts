@@ -137,4 +137,33 @@ describe('Helvault SQLite Schema', () => {
     expect(base64Id).toBeTruthy();
     expect(typeof base64Id).toBe('string');
   });
+
+  it('should ensure all inventory rows have scryfall_id and collection info', () => {
+    const stmt = db.prepare(`
+      SELECT 
+        c.ZSCRYFALLID,
+        c.ZORACLEID,
+        b.ZNAME as collection_name,
+        b.ZBINDERID
+      FROM ZPERSISTEDCOPY copy
+      JOIN ZPERSISTEDCARD c ON copy.ZCARD = c.Z_PK
+      JOIN ZPERSISTEDBINDER b ON copy.ZBINDER = b.Z_PK
+    `);
+
+    const results = [];
+    while (stmt.step()) {
+      results.push(stmt.getAsObject());
+    }
+    stmt.free();
+
+    expect(results.length).toBeGreaterThan(0);
+    
+    for (const row of results) {
+      // Every row should have scryfall_id OR oracle_id
+      expect(row.ZSCRYFALLID || row.ZORACLEID).toBeTruthy();
+      // Every row should have collection info
+      expect(row.collection_name).toBeTruthy();
+      expect(row.ZBINDERID).toBeTruthy();
+    }
+  });
 });

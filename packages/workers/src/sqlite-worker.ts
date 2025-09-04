@@ -115,11 +115,13 @@ async function handleLoadHelvault(message: LoadHelvaultMessage) {
     const inventoryStmt = database.prepare(`
       SELECT 
         c.ZSCRYFALLID,
+        c.ZORACLEID,
         c.ZSET, 
         c.ZCOLLECTORNUMBER,
         c.ZLANG,
         copy.ZFINISH,
         b.ZBINDERID,
+        b.ZNAME as collection_name,
         copy.ZCOPIES
       FROM ZPERSISTEDCOPY copy
       JOIN ZPERSISTEDCARD c ON copy.ZCARD = c.Z_PK
@@ -129,8 +131,17 @@ async function handleLoadHelvault(message: LoadHelvaultMessage) {
     const inventoryRows: InventoryItem[] = [];
     while (inventoryStmt.step()) {
       const row = inventoryStmt.getAsObject();
+      
+      // Ensure we have either scryfall_id or oracle_id
+      const scryfallId = row.ZSCRYFALLID as string;
+      const oracleId = row.ZORACLEID as string;
+      if (!scryfallId && !oracleId) {
+        console.warn('Skipping inventory row without scryfall_id or oracle_id');
+        continue;
+      }
+      
       inventoryRows.push({
-        scryfall_id: row.ZSCRYFALLID as string,
+        scryfall_id: scryfallId || oracleId, // Use oracle_id as fallback
         set: row.ZSET as string,
         collector_number: row.ZCOLLECTORNUMBER as string,
         lang: row.ZLANG as string,
@@ -145,6 +156,7 @@ async function handleLoadHelvault(message: LoadHelvaultMessage) {
     const aggregatesStmt = database.prepare(`
       SELECT 
         c.ZSCRYFALLID,
+        c.ZORACLEID,
         c.ZSET,
         c.ZCOLLECTORNUMBER,
         c.ZLANG,
@@ -154,14 +166,23 @@ async function handleLoadHelvault(message: LoadHelvaultMessage) {
       FROM ZPERSISTEDCOPY copy
       JOIN ZPERSISTEDCARD c ON copy.ZCARD = c.Z_PK
       JOIN ZPERSISTEDBINDER b ON copy.ZBINDER = b.Z_PK
-      GROUP BY c.ZSCRYFALLID, c.ZSET, c.ZCOLLECTORNUMBER, c.ZLANG, copy.ZFINISH, b.ZNAME
+      GROUP BY c.ZSCRYFALLID, c.ZORACLEID, c.ZSET, c.ZCOLLECTORNUMBER, c.ZLANG, copy.ZFINISH, b.ZNAME
     `);
     
     const aggregates: InventoryAggregate[] = [];
     while (aggregatesStmt.step()) {
       const row = aggregatesStmt.getAsObject();
+      
+      // Ensure we have either scryfall_id or oracle_id
+      const scryfallId = row.ZSCRYFALLID as string;
+      const oracleId = row.ZORACLEID as string;
+      if (!scryfallId && !oracleId) {
+        console.warn('Skipping aggregate row without scryfall_id or oracle_id');
+        continue;
+      }
+      
       aggregates.push({
-        scryfall_id: row.ZSCRYFALLID as string,
+        scryfall_id: scryfallId || oracleId, // Use oracle_id as fallback
         set: row.ZSET as string,
         collector_number: row.ZCOLLECTORNUMBER as string,
         lang: row.ZLANG as string,
