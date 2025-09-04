@@ -1,0 +1,372 @@
+import { createFileRoute } from '@tanstack/react-router';
+import { useState, useRef } from 'react';
+import { createHelvaultClient } from '@bag-of-holding/workers';
+
+export const Route = createFileRoute('/test')({
+  component: TestPage,
+});
+
+interface TestResult {
+  inventoryRows: Array<{
+    scryfall_id: string;
+    set: string;
+    collector_number: string;
+    copies: number;
+    collection_id: string;
+    finishes: string[];
+  }>;
+  aggregates: Array<{
+    scryfall_id: string;
+    set: string;
+    collector_number: string;
+    collection: string;
+    copies: number;
+    finishes: string[];
+    lang: string;
+  }>;
+  loadTime: number;
+}
+
+function TestPage() {
+  const [isLoading, setIsLoading] = useState(false);
+  const [result, setResult] = useState<TestResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const processFile = async (file: File) => {
+    if (!file.name.endsWith('.helvault')) {
+      setError('Please select a .helvault file');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      // Convert file to ArrayBuffer
+      const arrayBuffer = await file.arrayBuffer();
+      
+      // Create Helvault client with worker
+      const client = createHelvaultClient('/workers/sqlite-worker.js');
+      
+      const start = performance.now();
+      const importResult = await client.openHelvault(arrayBuffer);
+      const loadTime = performance.now() - start;
+      
+      setResult({
+        ...importResult,
+        loadTime,
+      });
+      
+      // Clean up worker
+      client.terminate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to process file');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    
+    const files = Array.from(e.dataTransfer.files);
+    const helvaultFile = files.find(f => f.name.endsWith('.helvault'));
+    
+    if (helvaultFile) {
+      processFile(helvaultFile);
+    } else {
+      setError('No .helvault file found in dropped files');
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processFile(file);
+    }
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  return (
+    <div className="p-8">
+      <div className="max-w-6xl mx-auto">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            🧪 Helvault Importer Test
+          </h1>
+          <p className="text-gray-600">
+            Test the Helvault SQLite importer by dropping a .helvault file below
+          </p>
+        </div>
+
+        {/* File Drop Zone */}
+        <div
+          className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors mb-8 ${
+            isDragOver
+              ? 'border-blue-500 bg-blue-50'
+              : 'border-gray-300 hover:border-gray-400'
+          }`}
+          onDrop={handleDrop}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDragOver(true);
+          }}
+          onDragLeave={() => setIsDragOver(false)}
+        >
+          <div className="space-y-4">
+            <div className="text-4xl">📁</div>
+            <div>
+              <p className="text-lg font-medium text-gray-900">
+                Drop your .helvault file here
+              </p>
+              <p className="text-sm text-gray-500 mt-1">
+                or click to select a file
+              </p>
+            </div>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+            >
+              Choose File
+            </button>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".helvault"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+        </div>
+
+        {/* Loading State */}
+        {isLoading && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-8">
+            <div className="flex items-center">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3"></div>
+              <span className="text-blue-800">Processing .helvault file...</span>
+            </div>
+          </div>
+        )}
+
+        {/* Error State */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6 mb-8">
+            <div className="flex">
+              <div className="text-red-400 text-xl mr-3">❌</div>
+              <div>
+                <h3 className="text-red-800 font-medium">Error</h3>
+                <p className="text-red-700 mt-1">{error}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Results */}
+        {result && (
+          <div className="space-y-6">
+            {/* Summary */}
+            <div className="bg-green-50 border border-green-200 rounded-lg p-6">
+              <div className="flex items-center mb-4">
+                <div className="text-green-400 text-xl mr-3">✅</div>
+                <h3 className="text-green-800 font-medium text-lg">
+                  Import Successful
+                </h3>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <div className="text-green-600 font-medium">Load Time</div>
+                  <div className="text-green-800">{result.loadTime.toFixed(2)}ms</div>
+                </div>
+                <div>
+                  <div className="text-green-600 font-medium">Inventory Rows</div>
+                  <div className="text-green-800">{result.inventoryRows.length.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-green-600 font-medium">Aggregates</div>
+                  <div className="text-green-800">{result.aggregates.length.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-green-600 font-medium">Total Copies</div>
+                  <div className="text-green-800">
+                    {result.inventoryRows.reduce((sum, row) => sum + row.copies, 0).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Sample Inventory Rows */}
+            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Sample Inventory Rows (First 10)
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Scryfall ID
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Set
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Number
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Copies
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Collection
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Finishes
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {result.inventoryRows.slice(0, 10).map((row, index) => (
+                      <tr key={index}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-600">
+                          {row.scryfall_id.substring(0, 8)}...
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {row.set}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {row.collector_number}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {row.copies}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 font-mono">
+                          {row.collection_id.substring(0, 12)}...
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {row.finishes.join(', ')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Sample Aggregates */}
+            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Sample Aggregates (First 10)
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Scryfall ID
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Set
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Number
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Collection
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Copies
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Lang
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {result.aggregates.slice(0, 10).map((agg, index) => (
+                      <tr key={index}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-600">
+                          {agg.scryfall_id.substring(0, 8)}...
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {agg.set}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {agg.collector_number}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {agg.collection}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {agg.copies}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {agg.lang}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Validation Results */}
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">
+                Validation Results
+              </h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span>All inventory rows have scryfall_id:</span>
+                  <span className={`font-medium ${
+                    result.inventoryRows.every(row => row.scryfall_id) 
+                      ? 'text-green-600' 
+                      : 'text-red-600'
+                  }`}>
+                    {result.inventoryRows.every(row => row.scryfall_id) ? '✅ Yes' : '❌ No'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>All aggregates have collection names:</span>
+                  <span className={`font-medium ${
+                    result.aggregates.every(agg => agg.collection) 
+                      ? 'text-green-600' 
+                      : 'text-red-600'
+                  }`}>
+                    {result.aggregates.every(agg => agg.collection) ? '✅ Yes' : '❌ No'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Raw vs aggregate copy totals match:</span>
+                  <span className={`font-medium ${
+                    result.inventoryRows.reduce((sum, row) => sum + row.copies, 0) === 
+                    result.aggregates.reduce((sum, agg) => sum + agg.copies, 0)
+                      ? 'text-green-600' 
+                      : 'text-red-600'
+                  }`}>
+                    {result.inventoryRows.reduce((sum, row) => sum + row.copies, 0) === 
+                     result.aggregates.reduce((sum, agg) => sum + agg.copies, 0) ? '✅ Yes' : '❌ No'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
