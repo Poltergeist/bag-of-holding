@@ -1,13 +1,42 @@
 {
   "name": "bag-of-holding",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Web app for Magic: The Gathering collectors to import Helvault exports and manage collections",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
+    "lint:fix": "eslint . --ext .js,.jsx,.ts,.tsx --fix",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,css,md}\"",
+    "clean": "pnpm -r clean && rm -rf node_modules"
   },
-  "keywords": [],
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "@typescript-eslint/parser": "^8.18.2",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react": "^7.37.2",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  },
+  "keywords": [
+    "mtg",
+    "magic-the-gathering",
+    "collection",
+    "helvault",
+    "deck",
+    "cards"
+  ],
   "author": "",
-  "license": "ISC",
-  "packageManager": "pnpm@10.15.0"
+  "license": "ISC"
 }
