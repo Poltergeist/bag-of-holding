@@ -1,0 +1,4 @@
+
+# Analysis files - exclude from commits
+PR_COMMENT_FOR_20.md
+SUGGESTED_CI_FIX.yml
