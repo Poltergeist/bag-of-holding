@@ -4,23 +4,49 @@ import type {
   WorkerResponse,
   HelvaultLoadedResponse,
   CardsQueryResponse,
-  InventoryQueryResponse
+  InventoryQueryResponse,
+  LoadHelvaultMessage
 } from './types.js';
-import type { HelvaultExport } from '@bag-of-holding/core';
+import type { HelvaultExport, InventoryItem, InventoryAggregate, Collection, Card } from '@bag-of-holding/core';
+
+// Helper function to convert Uint8Array to base64 in browser environment
+function uint8ArrayToBase64(uint8Array: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < uint8Array.length; i++) {
+    binary += String.fromCharCode(uint8Array[i]);
+  }
+  return btoa(binary);
+}
+
+// Import sql.js dynamically in worker context
+let SQL: import('sql.js').SqlJsStatic | null = null;
+
+async function initSqlJs(): Promise<import('sql.js').SqlJsStatic> {
+  if (!SQL) {
+    // Load sql.js from the server using importScripts (works in classic workers)
+    /* eslint-disable no-undef */
+    importScripts('/sql/sql-wasm.js');
+    /* eslint-enable no-undef */
+    
+    // Initialize SQL with WASM file location
+    // @ts-expect-error - sql.js creates a global initSqlJs function
+    SQL = await initSqlJs({
+      locateFile: (file: string) => `/sql/${file}`
+    });
+  }
+  return SQL!;
+}
 
 /**
- * SQLite Worker implementation
+ * SQLite Worker implementation for Helvault .helvault files
  * 
- * NOTE: This is a placeholder implementation. In a real app, this would:
- * 1. Import sql.js WASM library
- * 2. Load and parse the .helvault SQLite file
- * 3. Execute SQL queries against the database
- * 4. Return results via postMessage
- * 
- * For now, it simulates the interface and returns mock data
+ * This worker loads and parses Helvault SQLite exports using sql.js,
+ * extracts inventory data with proper joins, and returns both raw rows
+ * and aggregated data.
  */
 
-// Global state (in real worker, this would be the sql.js database)
+// Global state - the loaded SQLite database
+let database: import('sql.js').Database | null = null;
 let helvaultData: HelvaultExport | null = null;
 
 // Listen for messages from main thread
@@ -45,58 +71,157 @@ self.onmessage = function(event: MessageEvent<AnyWorkerMessage>) {
   }
 };
 
-async function handleLoadHelvault(message: AnyWorkerMessage) {
+async function handleLoadHelvault(message: LoadHelvaultMessage) {
   try {
-    // In a real implementation, this would:
-    // 1. Initialize sql.js
-    // 2. Load the ArrayBuffer as a SQLite database
-    // 3. Query the database structure
+    // Initialize sql.js
+    const sqlJs = await initSqlJs();
     
-    // Mock implementation - simulate loading
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Load the .helvault file from ArrayBuffer
+    const fileBuffer = new Uint8Array(message.payload.file);
+    database = new sqlJs.Database(fileBuffer);
     
-    // Mock data structure
+    // Query collections from ZPERSISTEDBINDER
+    const collectionsStmt = database!.prepare(`
+      SELECT Z_PK, ZBINDERID, ZNAME, ZPRIORITY
+      FROM ZPERSISTEDBINDER
+      ORDER BY ZPRIORITY
+    `);
+    
+    const collections: Collection[] = [];
+    while (collectionsStmt.step()) {
+      const row = collectionsStmt.getAsObject();
+      collections.push({
+        id: uint8ArrayToBase64(row.ZBINDERID as Uint8Array),
+        name: row.ZNAME as string,
+        priority: row.ZPRIORITY as number
+      });
+    }
+    collectionsStmt.free();
+    
+    // Query cards from ZPERSISTEDCARD
+    const cardsStmt = database!.prepare(`
+      SELECT ZSCRYFALLID, ZORACLEID, ZNAME, ZSET, ZCOLLECTORNUMBER, 
+             ZLANG, ZRARITY, ZMANACOST, ZCMC, ZTYPELINE
+      FROM ZPERSISTEDCARD
+    `);
+    
+    const cards: Card[] = [];
+    while (cardsStmt.step()) {
+      const row = cardsStmt.getAsObject();
+      cards.push({
+        scryfall_id: row.ZSCRYFALLID as string,
+        oracle_id: row.ZORACLEID as string,
+        name: row.ZNAME as string,
+        set: row.ZSET as string,
+        collector_number: row.ZCOLLECTORNUMBER as string,
+        lang: row.ZLANG as string,
+        finishes: [row.ZFINISH as string || 'nonfoil'], // Will be properly handled in inventory query
+        rarity: row.ZRARITY as string,
+        mana_cost: row.ZMANACOST as string,
+        cmc: row.ZCMC as number,
+        colors: [], // TODO: Parse from mana cost or add color columns
+        type_line: row.ZTYPELINE as string
+      });
+    }
+    cardsStmt.free();
+    
+    // Query inventory with joins - raw per-copy rows
+    const inventoryStmt = database!.prepare(`
+      SELECT 
+        c.ZSCRYFALLID,
+        c.ZORACLEID,
+        c.ZSET, 
+        c.ZCOLLECTORNUMBER,
+        c.ZLANG,
+        copy.ZFINISH,
+        b.ZBINDERID,
+        b.ZNAME as collection_name,
+        copy.ZCOPIES
+      FROM ZPERSISTEDCOPY copy
+      JOIN ZPERSISTEDCARD c ON copy.ZCARD = c.Z_PK
+      JOIN ZPERSISTEDBINDER b ON copy.ZBINDER = b.Z_PK
+    `);
+    
+    const inventoryRows: InventoryItem[] = [];
+    while (inventoryStmt.step()) {
+      const row = inventoryStmt.getAsObject();
+      
+      // Ensure we have either scryfall_id or oracle_id
+      const scryfallId = row.ZSCRYFALLID as string;
+      const oracleId = row.ZORACLEID as string;
+      if (!scryfallId && !oracleId) {
+        console.warn('Skipping inventory row without scryfall_id or oracle_id');
+        continue;
+      }
+      
+      inventoryRows.push({
+        scryfall_id: scryfallId || oracleId, // Use oracle_id as fallback
+        set: row.ZSET as string,
+        collector_number: row.ZCOLLECTORNUMBER as string,
+        lang: row.ZLANG as string,
+        finishes: [row.ZFINISH as string],
+        collection_id: uint8ArrayToBase64(row.ZBINDERID as Uint8Array),
+        copies: row.ZCOPIES as number
+      });
+    }
+    inventoryStmt.free();
+    
+    // Create aggregates - grouped by (scryfall_id, set, collector_number, lang, finishes, collection)
+    const aggregatesStmt = database!.prepare(`
+      SELECT 
+        c.ZSCRYFALLID,
+        c.ZORACLEID,
+        c.ZSET,
+        c.ZCOLLECTORNUMBER,
+        c.ZLANG,
+        copy.ZFINISH,
+        b.ZNAME as collection_name,
+        SUM(copy.ZCOPIES) as total_copies
+      FROM ZPERSISTEDCOPY copy
+      JOIN ZPERSISTEDCARD c ON copy.ZCARD = c.Z_PK
+      JOIN ZPERSISTEDBINDER b ON copy.ZBINDER = b.Z_PK
+      GROUP BY c.ZSCRYFALLID, c.ZORACLEID, c.ZSET, c.ZCOLLECTORNUMBER, c.ZLANG, copy.ZFINISH, b.ZNAME
+    `);
+    
+    const aggregates: InventoryAggregate[] = [];
+    while (aggregatesStmt.step()) {
+      const row = aggregatesStmt.getAsObject();
+      
+      // Ensure we have either scryfall_id or oracle_id
+      const scryfallId = row.ZSCRYFALLID as string;
+      const oracleId = row.ZORACLEID as string;
+      if (!scryfallId && !oracleId) {
+        console.warn('Skipping aggregate row without scryfall_id or oracle_id');
+        continue;
+      }
+      
+      aggregates.push({
+        scryfall_id: scryfallId || oracleId, // Use oracle_id as fallback
+        set: row.ZSET as string,
+        collector_number: row.ZCOLLECTORNUMBER as string,
+        lang: row.ZLANG as string,
+        finishes: [row.ZFINISH as string],
+        collection: row.collection_name as string,
+        copies: row.total_copies as number
+      });
+    }
+    aggregatesStmt.free();
+    
+    // Store the parsed data
     helvaultData = {
-      collections: [
-        { id: '1', name: 'Main Collection', priority: 1 },
-        { id: '2', name: 'Foils', priority: 2 }
-      ],
-      cards: [
-        {
-          scryfall_id: '1',
-          oracle_id: 'oracle-1',
-          name: 'Lightning Bolt',
-          set: 'lea',
-          collector_number: '161',
-          lang: 'en',
-          finishes: ['nonfoil'],
-          rarity: 'common',
-          mana_cost: '{R}',
-          cmc: 1,
-          colors: ['R'],
-          type_line: 'Instant'
-        }
-      ],
-      inventory: [
-        {
-          scryfall_id: '1',
-          set: 'lea',
-          collector_number: '161',
-          lang: 'en',
-          finishes: ['nonfoil'],
-          collection_id: '1',
-          copies: 4
-        }
-      ]
+      collections,
+      cards,
+      inventory: inventoryRows
     };
 
     const response: HelvaultLoadedResponse = {
       id: message.id,
       type: 'helvault-loaded',
       payload: {
-        collections: helvaultData.collections.length,
-        cards: helvaultData.cards.length,
-        inventory: helvaultData.inventory.length
+        inventoryRows,
+        aggregates,
+        collections: collections.length,
+        cards: cards.length
       }
     };
 

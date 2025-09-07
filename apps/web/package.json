@@ -19,7 +19,8 @@
     "@tanstack/react-router": "^1.91.11",
     "@tanstack/router-devtools": "^1.91.11",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "sql.js": "^1.13.0"
   },
   "devDependencies": {
     "@tanstack/router-cli": "^1.131.35",
@@ -29,6 +30,7 @@
     "@testing-library/user-event": "^14.5.2",
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",
+    "@types/sql.js": "^1.4.9",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "eslint-plugin-react-refresh": "^0.4.16",
@@ -40,4 +42,3 @@
     "vitest": "^2.1.8"
   }
 }
-
