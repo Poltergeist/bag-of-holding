@@ -4,6 +4,15 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import Database from 'sql.js';
 
+// Helper function to convert Uint8Array to base64 in browser environment
+function uint8ArrayToBase64(uint8Array: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < uint8Array.length; i++) {
+    binary += String.fromCharCode(uint8Array[i]);
+  }
+  return btoa(binary);
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -132,7 +141,7 @@ describe('Helvault SQLite Schema', () => {
     stmt.free();
 
     const binderIdBuffer = result.ZBINDERID as Uint8Array;
-    const base64Id = Buffer.from(binderIdBuffer).toString('base64');
+    const base64Id = uint8ArrayToBase64(binderIdBuffer);
     
     expect(base64Id).toBeTruthy();
     expect(typeof base64Id).toBe('string');

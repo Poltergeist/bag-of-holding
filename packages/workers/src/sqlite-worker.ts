@@ -9,21 +9,32 @@ import type {
 } from './types.js';
 import type { HelvaultExport, InventoryItem, InventoryAggregate, Collection, Card } from '@bag-of-holding/core';
 
-// Import sql.js dynamically in worker context
-let SQL: any = null;
+// Helper function to convert Uint8Array to base64 in browser environment
+function uint8ArrayToBase64(uint8Array: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < uint8Array.length; i++) {
+    binary += String.fromCharCode(uint8Array[i]);
+  }
+  return btoa(binary);
+}
 
-async function initSqlJs() {
+// Import sql.js dynamically in worker context
+let SQL: import('sql.js').SqlJsStatic | null = null;
+
+async function initSqlJs(): Promise<import('sql.js').SqlJsStatic> {
   if (!SQL) {
     // Load sql.js from the server using importScripts (works in classic workers)
+    /* eslint-disable no-undef */
     importScripts('/sql/sql-wasm.js');
+    /* eslint-enable no-undef */
     
     // Initialize SQL with WASM file location
-    // @ts-ignore - sql.js creates a global initSqlJs function
+    // @ts-expect-error - sql.js creates a global initSqlJs function
     SQL = await initSqlJs({
       locateFile: (file: string) => `/sql/${file}`
     });
   }
-  return SQL;
+  return SQL!;
 }
 
 /**
@@ -35,7 +46,7 @@ async function initSqlJs() {
  */
 
 // Global state - the loaded SQLite database
-let database: any = null;
+let database: import('sql.js').Database | null = null;
 let helvaultData: HelvaultExport | null = null;
 
 // Listen for messages from main thread
@@ -70,7 +81,7 @@ async function handleLoadHelvault(message: LoadHelvaultMessage) {
     database = new sqlJs.Database(fileBuffer);
     
     // Query collections from ZPERSISTEDBINDER
-    const collectionsStmt = database.prepare(`
+    const collectionsStmt = database!.prepare(`
       SELECT Z_PK, ZBINDERID, ZNAME, ZPRIORITY
       FROM ZPERSISTEDBINDER
       ORDER BY ZPRIORITY
@@ -80,7 +91,7 @@ async function handleLoadHelvault(message: LoadHelvaultMessage) {
     while (collectionsStmt.step()) {
       const row = collectionsStmt.getAsObject();
       collections.push({
-        id: Buffer.from(row.ZBINDERID as Uint8Array).toString('base64'),
+        id: uint8ArrayToBase64(row.ZBINDERID as Uint8Array),
         name: row.ZNAME as string,
         priority: row.ZPRIORITY as number
       });
@@ -88,7 +99,7 @@ async function handleLoadHelvault(message: LoadHelvaultMessage) {
     collectionsStmt.free();
     
     // Query cards from ZPERSISTEDCARD
-    const cardsStmt = database.prepare(`
+    const cardsStmt = database!.prepare(`
       SELECT ZSCRYFALLID, ZORACLEID, ZNAME, ZSET, ZCOLLECTORNUMBER, 
              ZLANG, ZRARITY, ZMANACOST, ZCMC, ZTYPELINE
       FROM ZPERSISTEDCARD
@@ -115,7 +126,7 @@ async function handleLoadHelvault(message: LoadHelvaultMessage) {
     cardsStmt.free();
     
     // Query inventory with joins - raw per-copy rows
-    const inventoryStmt = database.prepare(`
+    const inventoryStmt = database!.prepare(`
       SELECT 
         c.ZSCRYFALLID,
         c.ZORACLEID,
@@ -149,14 +160,14 @@ async function handleLoadHelvault(message: LoadHelvaultMessage) {
         collector_number: row.ZCOLLECTORNUMBER as string,
         lang: row.ZLANG as string,
         finishes: [row.ZFINISH as string],
-        collection_id: Buffer.from(row.ZBINDERID as Uint8Array).toString('base64'),
+        collection_id: uint8ArrayToBase64(row.ZBINDERID as Uint8Array),
         copies: row.ZCOPIES as number
       });
     }
     inventoryStmt.free();
     
     // Create aggregates - grouped by (scryfall_id, set, collector_number, lang, finishes, collection)
-    const aggregatesStmt = database.prepare(`
+    const aggregatesStmt = database!.prepare(`
       SELECT 
         c.ZSCRYFALLID,
         c.ZORACLEID,

@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 
 export const Route = createFileRoute('/test')({
   component: TestPage,
@@ -10,6 +10,7 @@ interface TestResult {
     scryfall_id: string;
     set: string;
     collector_number: string;
+    lang: string;
     copies: number;
     collection_id: string;
     finishes: string[];
@@ -77,7 +78,7 @@ function TestPage() {
         JOIN ZPERSISTEDBINDER b ON copy.ZBINDER = b.Z_PK
       `);
       
-      const inventoryRows: any[] = [];
+      const inventoryRows: TestResult['inventoryRows'] = [];
       while (inventoryStmt.step()) {
         const row = inventoryStmt.getAsObject();
         
@@ -134,7 +135,7 @@ function TestPage() {
         GROUP BY c.ZSCRYFALLID, c.ZORACLEID, c.ZSET, c.ZCOLLECTORNUMBER, c.ZLANG, copy.ZFINISH, b.ZNAME
       `);
       
-      const aggregates: any[] = [];
+      const aggregates: TestResult['aggregates'] = [];
       while (aggregatesStmt.step()) {
         const row = aggregatesStmt.getAsObject();
         
@@ -196,14 +197,6 @@ function TestPage() {
     if (file) {
       processFile(file);
     }
-  };
-
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   return (
